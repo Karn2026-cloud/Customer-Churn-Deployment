@@ -3,9 +3,10 @@ import os
 import streamlit as st
 import requests
 
-# --------------------------------------------------
-# PAGE CONFIGURATION
-# --------------------------------------------------
+
+# ==================================================
+# 1. PAGE CONFIGURATION
+# ==================================================
 
 st.set_page_config(
     page_title="Customer Churn Predictor",
@@ -14,23 +15,69 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --------------------------------------------------
-# API CONFIGURATION
-# --------------------------------------------------
 
-# Local API is used by default.
-# On Render, configure API_URL as an environment variable.
-API_URL = os.getenv(
+# ==================================================
+# 2. API CONFIGURATION
+# ==================================================
+
+# Local default:
+# http://127.0.0.1:8000/predict
+#
+# Render environment variable can be either:
+# https://your-backend.onrender.com
+# OR
+# https://your-backend.onrender.com/predict
+
+raw_api_url = os.getenv(
     "API_URL",
-    "http://127.0.0.1:8000/predict"
+    "http://127.0.0.1:8000"
 ).strip().rstrip("/")
 
-# --------------------------------------------------
-# CUSTOM CSS
-# --------------------------------------------------
 
-st.markdown("""
-<style>
+def normalize_api_url(url):
+    """
+    Ensure that the API URL always points to POST /predict.
+    """
+
+    url = url.strip().rstrip("/")
+
+    if not url:
+        raise ValueError("API_URL environment variable is empty.")
+
+    if url.endswith("/predict"):
+        return url
+
+    return url + "/predict"
+
+
+try:
+    API_URL = normalize_api_url(raw_api_url)
+    API_CONFIG_ERROR = None
+
+except ValueError as error:
+    API_URL = None
+    API_CONFIG_ERROR = str(error)
+
+
+def get_health_url():
+    """
+    Convert prediction URL into health endpoint URL.
+    """
+
+    if not API_URL:
+        return None
+
+    return API_URL.rsplit("/predict", 1)[0] + "/health"
+
+
+# ==================================================
+# 3. CUSTOM CSS
+# ==================================================
+
+st.markdown(
+    """
+    <style>
+
     .main {
         background-color: #f5f7fb;
     }
@@ -76,14 +123,19 @@ st.markdown("""
         background-color: #0e4f87;
         color: white;
     }
-</style>
-""", unsafe_allow_html=True)
 
-# --------------------------------------------------
-# SIDEBAR
-# --------------------------------------------------
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+
+# ==================================================
+# 4. SIDEBAR
+# ==================================================
 
 with st.sidebar:
+
     st.title("📊 Churn Predictor")
 
     st.write("Machine Learning Based Prediction")
@@ -92,28 +144,61 @@ with st.sidebar:
 
     st.subheader("API Configuration")
 
-    st.caption("Backend endpoint:")
-    st.code(API_URL, language="text")
+    st.caption("Prediction endpoint:")
 
-    if st.button("Check Backend Connection", use_container_width=True):
+    if API_URL:
+        st.code(API_URL, language="text")
+    else:
+        st.error(API_CONFIG_ERROR)
 
-        health_url = API_URL.rsplit("/predict", 1)[0] + "/health"
+    if st.button(
+        "Check Backend Connection",
+        use_container_width=True
+    ):
+
+        health_url = get_health_url()
 
         try:
-            health_response = requests.get(
-                health_url,
-                timeout=15
-            )
 
-            if health_response.status_code == 200:
-                st.success("Backend is connected!")
-            else:
-                st.error(
-                    f"Backend returned status {health_response.status_code}"
+            with st.spinner("Checking backend..."):
+
+                health_response = requests.get(
+                    health_url,
+                    timeout=30
                 )
 
-        except requests.exceptions.RequestException as e:
-            st.error(f"Connection failed: {e}")
+            if health_response.status_code == 200:
+
+                health_data = health_response.json()
+
+                if health_data.get("model_loaded") is True:
+
+                    st.success("Backend and ML model are ready!")
+
+                else:
+
+                    st.warning(
+                        "Backend is running, but the model is unavailable."
+                    )
+
+            elif health_response.status_code == 503:
+
+                st.error("Backend is running, but the ML model is not loaded.")
+
+                st.code(health_response.text)
+
+            else:
+
+                st.error(
+                    f"Backend returned status "
+                    f"{health_response.status_code}"
+                )
+
+                st.code(health_response.text)
+
+        except requests.exceptions.RequestException as error:
+
+            st.error(f"Connection failed: {error}")
 
     st.divider()
 
@@ -125,11 +210,14 @@ with st.sidebar:
         "the company."
     )
 
-    st.caption("Developed using Python, Streamlit, FastAPI and Scikit-learn.")
+    st.caption(
+        "Developed using Python, Streamlit, FastAPI and Scikit-learn."
+    )
 
-# --------------------------------------------------
-# MAIN HEADER
-# --------------------------------------------------
+
+# ==================================================
+# 5. MAIN HEADER
+# ==================================================
 
 st.markdown(
     '<div class="main-title">Customer Churn Prediction</div>',
@@ -145,9 +233,10 @@ st.markdown(
 
 st.divider()
 
-# --------------------------------------------------
-# CUSTOMER INPUT FORM
-# --------------------------------------------------
+
+# ==================================================
+# 6. CUSTOMER INPUT FORM
+# ==================================================
 
 st.subheader("👤 Customer Information")
 
@@ -155,7 +244,10 @@ with st.form("customer_form"):
 
     col1, col2, col3 = st.columns(3)
 
-    # COLUMN 1
+    # ----------------------------------------------
+    # COLUMN 1: PERSONAL INFORMATION
+    # ----------------------------------------------
+
     with col1:
 
         st.markdown("#### Personal Information")
@@ -193,7 +285,10 @@ with st.form("customer_form"):
             ["Yes", "No"]
         )
 
-    # COLUMN 2
+    # ----------------------------------------------
+    # COLUMN 2: INTERNET AND SERVICES
+    # ----------------------------------------------
+
     with col2:
 
         st.markdown("#### Internet and Services")
@@ -228,7 +323,10 @@ with st.form("customer_form"):
             ["Yes", "No", "No internet service"]
         )
 
-    # COLUMN 3
+    # ----------------------------------------------
+    # COLUMN 3: BILLING INFORMATION
+    # ----------------------------------------------
+
     with col3:
 
         st.markdown("#### Billing Information")
@@ -284,13 +382,19 @@ with st.form("customer_form"):
         use_container_width=True
     )
 
-# --------------------------------------------------
-# PREDICTION
-# --------------------------------------------------
+
+# ==================================================
+# 7. PREDICTION
+# ==================================================
 
 if submitted:
 
+    # ----------------------------------------------
+    # CREATE CUSTOMER DATA
+    # ----------------------------------------------
+
     customer = {
+
         "gender": gender,
         "SeniorCitizen": senior,
         "Partner": partner,
@@ -310,32 +414,56 @@ if submitted:
         "PaymentMethod": payment,
         "MonthlyCharges": monthly,
         "TotalCharges": total
+
     }
 
-    # Basic input validation
+    # ----------------------------------------------
+    # INPUT VALIDATION
+    # ----------------------------------------------
+
     if tenure == 0 and total > 0:
+
         st.warning(
             "Please check the tenure and total charges values."
+        )
+
+    elif not API_URL:
+
+        st.error(
+            API_CONFIG_ERROR or "API URL is not configured."
         )
 
     else:
 
         try:
 
-            with st.spinner("Analyzing customer information..."):
+            # --------------------------------------
+            # SEND POST REQUEST TO /predict
+            # --------------------------------------
+
+            with st.spinner(
+                "Analyzing customer information..."
+            ):
 
                 response = requests.post(
                     API_URL,
                     json=customer,
-                    timeout=30
+                    headers={
+                        "Content-Type": "application/json"
+                    },
+                    timeout=60
                 )
 
-            # Successful prediction
+            # --------------------------------------
+            # SUCCESSFUL PREDICTION
+            # --------------------------------------
+
             if response.status_code == 200:
 
                 result = response.json()
 
                 prediction = result.get("prediction")
+
                 probability = float(
                     result.get("churn_probability", 0)
                 )
@@ -368,7 +496,13 @@ if submitted:
                 st.markdown("### Churn Probability")
 
                 st.progress(
-                    max(0, min(100, int(round(probability))))
+                    max(
+                        0,
+                        min(
+                            100,
+                            int(round(probability))
+                        )
+                    )
                 )
 
                 st.caption(
@@ -406,6 +540,49 @@ if submitted:
 
                 st.write("**API Message:**", message)
 
+            # --------------------------------------
+            # API ERROR HANDLING
+            # --------------------------------------
+
+            elif response.status_code == 405:
+
+                st.error(
+                    "HTTP 405: Method Not Allowed. "
+                    "Check that API_URL ends with /predict "
+                    "and that FastAPI defines POST /predict."
+                )
+
+                st.code(
+                    f"Request URL: {API_URL}\n"
+                    f"Response: {response.text}"
+                )
+
+            elif response.status_code == 422:
+
+                st.error(
+                    "HTTP 422: Customer data does not match "
+                    "the backend input schema."
+                )
+
+                st.code(response.text)
+
+            elif response.status_code == 503:
+
+                st.error(
+                    "HTTP 503: The prediction model is unavailable. "
+                    "Check the FastAPI /health endpoint and Render logs."
+                )
+
+                st.code(response.text)
+
+            elif response.status_code == 500:
+
+                st.error(
+                    "HTTP 500: Prediction failed inside the backend."
+                )
+
+                st.code(response.text)
+
             else:
 
                 st.error(
@@ -413,6 +590,10 @@ if submitted:
                 )
 
                 st.code(response.text)
+
+        # ------------------------------------------
+        # CONNECTION ERRORS
+        # ------------------------------------------
 
         except requests.exceptions.ConnectionError:
 
@@ -429,29 +610,39 @@ if submitted:
                 "Please try again."
             )
 
-        except requests.exceptions.RequestException as e:
+        except requests.exceptions.RequestException as error:
 
-            st.error(f"Request failed: {e}")
+            st.error(
+                f"Request failed: {error}"
+            )
 
-        except (ValueError, KeyError, TypeError) as e:
+        except (ValueError, KeyError, TypeError) as error:
 
-            st.error(f"Invalid API response: {e}")
+            st.error(
+                f"Invalid API response: {error}"
+            )
 
-        except Exception as e:
+        except Exception as error:
 
-            st.error(f"Unexpected error: {e}")
+            st.error(
+                f"Unexpected error: {error}"
+            )
 
-# --------------------------------------------------
-# FOOTER
-# --------------------------------------------------
+
+# ==================================================
+# 8. FOOTER
+# ==================================================
 
 st.divider()
 
 st.markdown(
     """
     <div style="text-align:center; color:#64748b; padding:15px;">
+
         <b>Customer Churn Prediction System</b><br>
+
         Built with Python | Machine Learning | FastAPI | Streamlit
+
     </div>
     """,
     unsafe_allow_html=True
